@@ -1,0 +1,80 @@
+---
+name: Update and Push Eclipse Temurin Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      BASE_IMAGE_JRE_ALPINE:
+        description: "Base image for Alpine build (e.g., eclipse-temurin:21-jre-alpine)"
+        required: true
+        type: string
+      BASE_IMAGE_JRE_UBUNTU:
+        description: "Base image for Ubuntu build (e.g., eclipse-temurin:21-jre-noble)"
+        required: true
+        type: string
+      BASE_IMAGE_JDK_ALPINE:
+        description: "Base image for Alpine build (e.g., eclipse-temurin:21-jdk-alpine)"
+        required: true
+        type: string
+      BASE_IMAGE_JDK_UBUNTU:
+        description: "Base image for Ubuntu build (e.g., eclipse-temurin:21-jdk-noble)"
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - project: alpine
+            base_image: ${{ inputs.BASE_IMAGE_JRE_ALPINE }}
+          - project: ubuntu
+            base_image: ${{ inputs.BASE_IMAGE_JRE_UBUNTU }}
+          - project: alpine
+            base_image: ${{ inputs.BASE_IMAGE_JDK_ALPINE }}
+          - project: ubuntu
+            base_image: ${{ inputs.BASE_IMAGE_JDK_UBUNTU }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Log in to Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name and tag
+        id: meta
+        run: |
+          INPUT="${{ matrix.base_image }}"
+          # Strip @sha256:... digest if present
+          WITHOUT_DIGEST="${INPUT%%@*}"
+          # Extract image name (before :) and tag (after :)
+          IMAGE_NAME="${WITHOUT_DIGEST%%:*}"
+          TAG_PART="${WITHOUT_DIGEST#*:}"
+          DATE="$(date +%Y%m%d)"
+          ITERATION="${{ github.run_number }}"
+          echo "image=${{ env.REGISTRY }}/${{ env.OWNER }}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG_PART}-${DATE}-${ITERATION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.project }}
+          push: true
+          build-args: |
+            BASE_IMAGE=${{ matrix.base_image }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
